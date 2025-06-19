@@ -13,8 +13,6 @@ namespace TrafficSimulator.Models
         public Node Source { get; set; }
         public Node Destination { get; set; }
         public double Weight { get; set; } // Peso de la arista (distancia, tiempo, etc.)
-
-        // Opcional: Referencia al UIElement para una manipulación más sencilla
         public Line UILine { get; set; }
         public TextBlock WeightTextBlock { get; set; }
 

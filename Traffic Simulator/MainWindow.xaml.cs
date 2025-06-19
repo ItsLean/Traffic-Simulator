@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using Microsoft.VisualBasic;
 using System.Collections.Generic;
 using System.Linq;
 using System; 
@@ -21,9 +22,14 @@ namespace TrafficSimulator
         private Random _random = new Random();
         private int _vehicleCounter = 0; // Para dar IDs únicos a los vehículos
         private double _simulationSpeed = 1.0; // Factor para acelerar/desacelerar la simulación (1.0 = normal)
-        private const double BaseVehicleSpeed = 50; // Pixels por segundo (la velocidad "real" del vehículo)
-        private TimeSpan _simulationTickInterval = TimeSpan.FromMilliseconds(50); // Frecuencia de actualización de la simulación
-
+        private const double BaseVehicleSpeed = 60; // Pixels por segundo (la velocidad "real" del vehículo)
+        private TimeSpan _simulationTickInterval = TimeSpan.FromMilliseconds(100); // Frecuencia de actualización de la simulación
+        private Vehicle _selectedVehicle = null;
+        private const double SelectedPathThickness = 5;
+        private static readonly Brush SelectedPathColor = Brushes.LimeGreen;
+        private Grid _selectedNodeContainer = null;
+        private bool _isDraggingNode = false;
+        private Point _lastMousePosition;
         public MainWindow()
         {
             InitializeComponent();
@@ -73,8 +79,10 @@ namespace TrafficSimulator
                 }
 
                 if (hasArrived)
-                {
+                {              
+                    HighlightVehiclePath(vehicle, false);
                     vehiclesToRemove.Add(vehicle);
+
                 }
             }
 
@@ -83,6 +91,7 @@ namespace TrafficSimulator
                 _vehicles.Remove(vehicle);
                 GraphCanvas.Children.Remove(vehicle.UIEllipse);
             }
+                
         }
 
         private void GenerateRandomVehicle()
@@ -111,7 +120,7 @@ namespace TrafficSimulator
             {
                 // No se encontró un camino válido entre los nodos
                 // Esto podría ocurrir si el grafo no está conectado
-                Console.WriteLine($"No path found from {startNode.Id} to {endNode.Id}");
+                Console.WriteLine($"No se encontró ningún camino desde {startNode.Id} a {endNode.Id}");
                 return;
             }
 
@@ -120,13 +129,179 @@ namespace TrafficSimulator
             Brush vehicleColor = GetRandomColor();
             Vehicle newVehicle = new Vehicle($"V{_vehicleCounter}", startNode, endNode, path, BaseVehicleSpeed, vehicleColor);
 
-            _vehicles.Add(newVehicle);
+            newVehicle.UIEllipse.MouseDown += Vehicle_MouseDown;
 
+            newVehicle.PathUILines = new List<Line>();
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                Node current = path[i];
+                Node next = path[i + 1];
+
+                // Buscar la arista (Edge) en el grafo que conecta estos dos nodos
+                // Consideramos ambas direcciones para grafos no dirigidos
+                Edge edgeInPath = _graph.Edges.FirstOrDefault(e =>
+                    (e.Source == current && e.Destination == next) ||
+                    (e.Source == next && e.Destination == current));
+
+                if (edgeInPath != null && edgeInPath.UILine != null)
+                {
+                    newVehicle.PathUILines.Add(edgeInPath.UILine);
+                }
+                else
+                {
+                    // Para depuración, si una arista esperada no se encuentra o no tiene UILine
+                    Console.WriteLine($"Peligro: Arista desde {current.Id} a {next.Id} no encontrada o UILine es nula para el camino del vehiculo {newVehicle.Id}");
+                }
+            }
+
+            _vehicles.Add(newVehicle);
             // Añadir el vehículo a la UI en la posición inicial del nodo de inicio
             Canvas.SetLeft(newVehicle.UIEllipse, startNode.X - newVehicle.UIEllipse.Width / 2);
             Canvas.SetTop(newVehicle.UIEllipse, startNode.Y - newVehicle.UIEllipse.Height / 2);
             GraphCanvas.Children.Add(newVehicle.UIEllipse);
         }
+        private void Vehicle_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            Ellipse clickedEllipse = sender as Ellipse;
+            if (clickedEllipse != null && e.LeftButton == MouseButtonState.Pressed)
+            {
+                Vehicle clickedVehicle = _vehicles.FirstOrDefault(v => v.UIEllipse == clickedEllipse);
+
+                if (clickedVehicle != null)
+                {
+                    // Si ya hay un vehículo seleccionado, desresaltar su ruta
+                    if (_selectedVehicle != null)
+                    {
+                        _selectedVehicle.IsSelected = false;
+                        HighlightVehiclePath(_selectedVehicle, false); // Desresaltar
+                    }
+
+                    // Seleccionar el nuevo vehículo
+                    _selectedVehicle = clickedVehicle;
+                    _selectedVehicle.IsSelected = true;
+                    HighlightVehiclePath(_selectedVehicle, true); // Resaltar
+
+                    clickedEllipse.Stroke = Brushes.Cyan; // Color diferente para el borde cuando está seleccionado
+                    clickedEllipse.StrokeThickness = 2;  // Un poco más grueso para destacar
+                }
+                e.Handled = true; // Indicar que el evento ha sido manejado
+            }
+        }
+
+        private void HighlightVehiclePath(Vehicle vehicle, bool highlight)
+        {
+            if (vehicle == null || vehicle.PathUILines == null) return;
+
+            foreach (Line line in vehicle.PathUILines)
+            {
+                if (highlight)
+                {
+                    line.Stroke = SelectedPathColor;
+                    line.StrokeThickness = SelectedPathThickness;
+                    Canvas.SetZIndex(line, 2); // Líneas normales pueden ser 0 o 1, nodos 3, vehículos 4
+                }
+                else
+                {
+                    Edge originalEdge = _graph.Edges.FirstOrDefault(e => e.UILine == line);
+                    if (originalEdge != null)
+                    {
+                        line.Stroke = Brushes.Black; // Color original de la arista
+                        line.StrokeThickness = 2;    // Grosor original
+                    }
+                    Canvas.SetZIndex(line, 0); // Volver a su ZIndex normal
+                }
+            }
+
+            // Si se deselecciona, restaurar también el borde del vehículo
+            if (!highlight && vehicle.UIEllipse != null)
+            {
+                vehicle.UIEllipse.Stroke = Brushes.Black;
+                vehicle.UIEllipse.StrokeThickness = 1;
+            }
+        }
+
+        private void RecalculateAllVehiclePaths()
+        {
+            // Detener la simulación brevemente si está activa para evitar problemas durante el recálculo
+            bool simulationWasRunning = false;
+            if (_simulationTimer.IsEnabled)
+            {
+                _simulationTimer.Stop();
+                simulationWasRunning = true;
+            }
+
+            // Lista temporal para vehículos que podrían necesitar ser removidos si no se encuentra ruta
+            List<Vehicle> vehiclesToRemove = new List<Vehicle>();
+
+            foreach (var vehicle in _vehicles)
+            {
+                // Desresaltar la ruta vieja si este vehículo estaba seleccionado antes de recalcular
+                if (vehicle == _selectedVehicle)
+                {
+                    HighlightVehiclePath(vehicle, false);
+                }
+
+                Graph.DijkstraResult result = _graph.CalculateShortestPaths(vehicle.StartNode); // Siempre desde el StartNode original
+                List<Node> newPath = _graph.GetShortestPath(vehicle.StartNode, vehicle.EndNode, result);
+
+                if (newPath != null && newPath.Count > 1)
+                {
+                    vehicle.Path = newPath;
+                    vehicle.CurrentPathSegmentIndex = 0; // Reinicia el vehículo al inicio de su nueva ruta
+                    vehicle.DistanceAlongSegment = 0;
+
+                    // Actualizar también las referencias a las UILines en el vehículo
+                    vehicle.PathUILines.Clear();
+                    for (int i = 0; i < newPath.Count - 1; i++)
+                    {
+                        Node current = newPath[i];
+                        Node next = newPath[i + 1];
+                        Edge edgeInNewPath = _graph.Edges.FirstOrDefault(e =>
+                            (e.Source == current && e.Destination == next) ||
+                            (e.Source == next && e.Destination == current));
+
+                        if (edgeInNewPath != null && edgeInNewPath.UILine != null)
+                        {
+                            vehicle.PathUILines.Add(edgeInNewPath.UILine);
+                        }
+                    }
+
+                    // Si este vehículo estaba seleccionado, resaltar su nueva ruta
+                    if (vehicle == _selectedVehicle)
+                    {
+                        HighlightVehiclePath(vehicle, true);
+                    }
+
+                }
+                else
+                {
+                    // Si no se encuentra una ruta (ej. por un cambio que bloqueó el camino),
+                    // el vehículo ya no tiene un camino válido y debería ser removido.
+                    if (vehicle == _selectedVehicle)
+                    {
+                        HighlightVehiclePath(vehicle, false); // Desresaltar si estaba seleccionado
+                        _selectedVehicle = null; // Deseleccionar
+                    }
+                    vehiclesToRemove.Add(vehicle);
+                    MessageBox.Show($"No se ha encontrado camino para el vehiculo {vehicle.Id} desde {vehicle.StartNode.Id} a {vehicle.EndNode.Id} después del cambio de peso de la arista. Removiendo vehiculo.", "Error de ruta", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+
+            // Remover vehículos que ya no tienen ruta
+            foreach (var vehicle in vehiclesToRemove)
+            {
+                _vehicles.Remove(vehicle);
+                GraphCanvas.Children.Remove(vehicle.UIEllipse); // Remover de la UI
+            }
+
+
+            // Reanudar la simulación si estaba activa
+            if (simulationWasRunning)
+            {
+                _simulationTimer.Start();
+            }
+        }
+
 
         private Brush GetRandomColor()
         {
@@ -150,14 +325,12 @@ namespace TrafficSimulator
 
                 if (string.IsNullOrWhiteSpace(nodeId))
                 {
-                    MessageBox.Show("El nombre del nodo no puede ser vacío.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
-
                 // Verificar si el nombre ya existe
                 if (_graph.Nodes.Any(n => n.Id.Equals(nodeId, StringComparison.OrdinalIgnoreCase)))
                 {
-                    MessageBox.Show($"Nodo wcon el nombre '{nodeId}' ya existe. Porfavor seleccione un nombre diferente.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show($"Nodo con el nombre '{nodeId}' ya existe. Porfavor seleccione un nombre diferente.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
 
@@ -208,18 +381,45 @@ namespace TrafficSimulator
                     $"Peso actual: {_contextMenuEdge.Weight}. Introduzca un nuevo peso:",
                     "Cambiar peso de arista",
                     _contextMenuEdge.Weight.ToString("F0")); // Mostrar el peso actual como valor predeterminado
+
                 if (double.TryParse(newWeightStr, out double newWeight) && newWeight > 0)
                 {
+                    // 1. Actualizar el peso en el modelo de la arista principal
                     _contextMenuEdge.Weight = newWeight;
-                    _contextMenuEdge.WeightTextBlock.Text = newWeight.ToString("F0"); // Actualizar el texto del peso en la UI
+                    if (_contextMenuEdge.WeightTextBlock != null)
+                    {
+                        _contextMenuEdge.WeightTextBlock.Text = newWeight.ToString("F0"); // Actualizar el texto del peso en la UI
+                    }
+
+                    // 2. Buscar y actualizar la arista inversa (si el grafo es bidireccional)
+                    // Esto es crucial para mantener la consistencia si tienes aristas en ambas direcciones
+                    Edge reverseEdge = _graph.Edges.FirstOrDefault(ed =>
+                        ed.Source == _contextMenuEdge.Destination && ed.Destination == _contextMenuEdge.Source);
+                    if (reverseEdge != null)
+                    {
+                        reverseEdge.Weight = newWeight; // Asigna el mismo peso a la inversa
+                                                        // Actualizar también el TextBlock de la arista inversa si lo tienes
+                        if (reverseEdge.WeightTextBlock != null)
+                        {
+                            reverseEdge.WeightTextBlock.Text = newWeight.ToString("F0");
+                        }
+                    }
+
+                    // 3. ¡IMPORTANTE! Recalcular las rutas para todos los vehículos.
+                    // Esto asegura que los vehículos consideren el nuevo peso en sus caminos más cortos.
+                    // Esto cumple con el Requerimiento 004: "visualizar los cambios en los cálculos de rutas más cortas".
+                    RecalculateAllVehiclePaths(); // Agregado
+
+                    MessageBox.Show($"El peso de la arista se ha actualizado a {newWeight}.", "Peso Actualizado", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
                 else
                 {
                     MessageBox.Show("Peso inválido. Debe ser un número positivo.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
+            // Siempre limpia la referencia a la arista del menú contextual después de usarla
+            _contextMenuEdge = null;
         }
-
 
         private void DeleteEdge_Click(object sender, RoutedEventArgs e)
         {
@@ -258,9 +458,16 @@ namespace TrafficSimulator
                 }
             }
         }
+
         private void DrawNode(Node node)
         {
-            // Dibujar un círculo para el nodo
+            // Crear el contenedor principal para el nodo (Grid)
+            // El Grid será el padre de la forma (Ellipse) y la etiqueta (TextBlock).
+            Grid nodeContainer = new Grid();
+            nodeContainer.Width = 60; // Ajusta el tamaño del contenedor al tamaño del nodo visual
+            nodeContainer.Height = 60;
+
+            // Dibujar un círculo para el nodo (nodeShape)
             Ellipse nodeShape = new Ellipse
             {
                 Width = 60,
@@ -270,40 +477,51 @@ namespace TrafficSimulator
                 StrokeThickness = 2
             };
 
-            // Centrar el nodo en las coordenadas de clic
-            Canvas.SetLeft(nodeShape, node.X - nodeShape.Width / 2);
-            Canvas.SetTop(nodeShape, node.Y - nodeShape.Height / 2);
+            // Agregar la forma al contenedor del nodo (nodeContainer es ahora su padre)
+            nodeContainer.Children.Add(nodeShape); // ¡Aquí se añade primero!
 
             // Almacenar referencia al UIElement en el modelo Node
-            node.UIEllipse = nodeShape;
-
-            // Manejar eventos de clic en el nodo para seleccionarlo para conexión
-            nodeShape.MouseDown += Node_MouseDown;
-            nodeShape.MouseUp += Node_MouseUp; // Puede ser útil si implementas arrastrar y soltar nodos
-
-            GraphCanvas.Children.Add(nodeShape);
+            node.UIEllipse = nodeShape; // La referencia a la elipse individual sigue siendo útil
 
             // Agregar una etiqueta de texto para el nombre del nodo
             TextBlock nodeLabel = new TextBlock
             {
                 Text = node.Id,
                 Foreground = Brushes.White,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center, // Centrado dentro del Grid
+                VerticalAlignment = VerticalAlignment.Center,   // Centrado dentro del Grid
                 FontSize = 10,
                 IsHitTestVisible = false // Para que los clics pasen al Ellipse de abajo
             };
-            node.UILable = nodeLabel;
 
-            // Posicionar la etiqueta sobre el nodo
-            Canvas.SetLeft(nodeLabel, node.X - (node.Id.Length * 3)); // Ajuste aproximado
-            Canvas.SetTop(nodeLabel, node.Y - nodeShape.Height / 2 + (nodeShape.Height / 2 - nodeLabel.FontSize / 2));
-            GraphCanvas.Children.Add(nodeLabel);
+            // Agregar la etiqueta al contenedor del nodo (nodeContainer es ahora su padre)
+            nodeContainer.Children.Add(nodeLabel); // ¡Aquí se añade primero!
+
+            // Almacenar referencia a la etiqueta individual en el modelo Node
+            node.UILabel = nodeLabel; 
+
+            // Asignar el contenedor completo al nodo en tu modelo
+            node.UIContainer = nodeContainer; //
+
+            // Centrar el CONTENEDOR del nodo en las coordenadas de clic en el Canvas
+            Canvas.SetLeft(node.UIContainer, node.X - nodeContainer.Width / 2);
+            Canvas.SetTop(node.UIContainer, node.Y - nodeContainer.Height / 2);
+            Canvas.SetZIndex(node.UIContainer, 2); //
+
+            // Manejar eventos de clic en el CONTENEDOR del nodo
+            // Esto es importante porque el Grid ahora contiene Ellipse y TextBlock,
+            // y quieres que el Grid completo responda a los eventos del ratón.
+            node.UIContainer.MouseLeftButtonDown += Node_MouseLeftButtonDown; //
+            node.UIContainer.MouseMove += Node_MouseMove; //
+            node.UIContainer.MouseLeftButtonUp += Node_MouseLeftButtonUp;
+            node.UIContainer.MouseRightButtonUp += Node_MouseRightButtonUp;
+
+
+            // Finalmente, agregar el CONTENEDOR del nodo al Canvas principal
+            GraphCanvas.Children.Add(node.UIContainer);
         }
 
-        // --- Conectar Nodos (ID 002) ---
-
-        private void Node_MouseDown(object sender, MouseButtonEventArgs e)
+        public void Node_MouseDown(object sender, MouseButtonEventArgs e)
         {
             // Detectar si se hizo clic en un nodo para empezar una conexión
             if (e.LeftButton == MouseButtonState.Pressed)
@@ -324,7 +542,7 @@ namespace TrafficSimulator
             }
         }
 
-        private void Node_MouseUp(object sender, MouseButtonEventArgs e)
+        public void Node_MouseUp(object sender, MouseButtonEventArgs e)
         {
             if (e.LeftButton == MouseButtonState.Released && _selectedNodeForConnection != null)
             {
@@ -400,13 +618,295 @@ namespace TrafficSimulator
             Canvas.SetLeft(weightText, centerX - (weightText.ActualWidth / 2));
             Canvas.SetTop(weightText, centerY - (weightText.ActualHeight / 2) - 10);
 
+            Canvas.SetZIndex(edgeLine, 0);
+            Canvas.SetZIndex(weightText, 1);
+
             GraphCanvas.Children.Insert(0, edgeLine);
             GraphCanvas.Children.Add(weightText);
 
             edge.UILine = edgeLine; 
             edge.WeightTextBlock = weightText;
         }
+        private void TryConnectNodes(Node sourceNode, Node destinationNode)
+        {
+            // Verificar si los nodos son los mismos o si la arista ya existe
+            bool edgeExists = _graph.Edges.Any(ed =>
+                (ed.Source == sourceNode && ed.Destination == destinationNode) ||
+                (ed.Source == destinationNode && ed.Destination == sourceNode));
 
+            if (edgeExists)
+            {
+                MessageBox.Show("Una arista ya existe entre estos dos nodos.", "Información", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            // Pedir el peso de la arista
+            string weightStr = Microsoft.VisualBasic.Interaction.InputBox("Introduzca un peso para la conexión (ej. distancia o tiempo):", "Peso de arista", "100"); //
+            if (double.TryParse(weightStr, out double weight))
+            {
+                Edge newEdge = new Edge(sourceNode, destinationNode, weight);
+                _graph.AddEdge(newEdge); // Asumiendo que AddEdge añade la arista al grafo
+                DrawEdge(newEdge);       // Asumiendo que DrawEdge dibuja la arista en el Canvas
+                                         // RecalculateAllVehiclePaths(); // Descomenta si tienes este método y lo necesitas aquí
+            }
+            else
+            {
+                MessageBox.Show("Peso inválido. Se usará 100 por defecto.", "Advertencia", MessageBoxButton.OK, MessageBoxImage.Warning);
+                // Opcional: si la entrada es inválida, puedes no crear la arista o crearla con un valor por defecto.
+                // Aquí se crea con 100 por defecto.
+                weight = 100;
+                Edge newEdge = new Edge(sourceNode, destinationNode, weight);
+                _graph.AddEdge(newEdge);
+                DrawEdge(newEdge);
+                // RecalculateAllVehiclePaths();
+            }
+        }
+
+        private void Node_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            _selectedNodeContainer = sender as Grid; //
+            if (_selectedNodeContainer != null)
+            {
+                // Encontrar el nodo del modelo asociado a este UIContainer
+                Node clickedNode = _graph.Nodes.FirstOrDefault(n => n.UIContainer == _selectedNodeContainer);
+                if (clickedNode != null)
+                {
+                    if (!(Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift)))
+                    {
+                        if (_selectedNodeForConnection != null && _selectedNodeForConnection != clickedNode)
+                        {
+                            Node destinationNode = clickedNode;
+
+                            // Llamar al método para intentar conectar los nodos
+                            TryConnectNodes(_selectedNodeForConnection, destinationNode);
+
+                            // Resetear la selección del primer nodo (desresaltarlo)
+                            _selectedNodeForConnection.UIEllipse.Stroke = Brushes.Blue; // Restaura color original
+                            _selectedNodeForConnection.UIEllipse.StrokeThickness = 2; // Restaura grosor original
+                            _selectedNodeForConnection = null; // Limpiar la referencia
+                        }
+                        else // Este es el primer nodo seleccionado para conexión
+                        {
+                            // Si ya teníamos un nodo seleccionado, lo desresaltamos primero
+                            if (_selectedNodeForConnection != null)
+                            {
+                                _selectedNodeForConnection.UIEllipse.Stroke = Brushes.Blue;
+                                _selectedNodeForConnection.UIEllipse.StrokeThickness = 2;
+                            }
+
+                            _selectedNodeForConnection = clickedNode; // Guarda este nodo como el primero para conexión
+                            _selectedNodeForConnection.UIEllipse.Stroke = Brushes.Red; // Resaltar visualmente
+                            _selectedNodeForConnection.UIEllipse.StrokeThickness = 4; // Resaltar visualmente
+                        }
+                    }
+                    else 
+                    {
+                        if (_selectedNodeForConnection != null)
+                        {
+                            _selectedNodeForConnection.UIEllipse.Stroke = Brushes.Blue;
+                            _selectedNodeForConnection.UIEllipse.StrokeThickness = 2;
+                            _selectedNodeForConnection = null;
+                        }
+
+                        _isDraggingNode = true; //
+                        _lastMousePosition = e.GetPosition(GraphCanvas); 
+                        _selectedNodeContainer.CaptureMouse(); // Capturar el mouse para seguir el arrastre
+                    }
+                    e.Handled = true; // Marca el evento como manejado
+                }
+            }
+        }
+
+        private void Node_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (_isDraggingNode && _selectedNodeContainer != null && e.LeftButton == MouseButtonState.Pressed)
+            {
+                Point currentMousePosition = e.GetPosition(GraphCanvas);
+                double deltaX = currentMousePosition.X - _lastMousePosition.X;
+                double deltaY = currentMousePosition.Y - _lastMousePosition.Y;
+
+                // Actualizar la posición del nodo en la UI
+                Canvas.SetLeft(_selectedNodeContainer, Canvas.GetLeft(_selectedNodeContainer) + deltaX);
+                Canvas.SetTop(_selectedNodeContainer, Canvas.GetTop(_selectedNodeContainer) + deltaY);
+
+                // Actualizar la posición del nodo en el modelo
+                Node draggedNode = _graph.Nodes.FirstOrDefault(n => n.UIContainer == _selectedNodeContainer);
+                if (draggedNode != null)
+                {
+                    draggedNode.X = Canvas.GetLeft(_selectedNodeContainer) + _selectedNodeContainer.ActualWidth / 2;
+                    draggedNode.Y = Canvas.GetTop(_selectedNodeContainer) + _selectedNodeContainer.ActualHeight / 2;
+
+                    UpdateConnectedEdges(draggedNode); // Actualizar las aristas conectadas
+                }
+
+                _lastMousePosition = currentMousePosition;
+                e.Handled = true;
+            }
+        }
+
+        private void Node_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            if (_isDraggingNode)
+            {
+                _isDraggingNode = false;
+                if (_selectedNodeContainer != null)
+                {
+                    _selectedNodeContainer.ReleaseMouseCapture();
+                    _selectedNodeContainer = null;
+                }
+                RecalculateAllVehiclePaths(); // Recalcular rutas después de soltar el nodo
+                e.Handled = true;
+            }
+            else if (_selectedNodeForConnection != null)
+            {
+                // Lógica para finalizar la conexión si se soltó sobre otro nodo
+                Grid releasedContainer = sender as Grid;
+                if (releasedContainer != null)
+                {
+                    Node destinationNode = _graph.Nodes.FirstOrDefault(n => n.UIContainer == releasedContainer);
+
+                    if (destinationNode != null && destinationNode != _selectedNodeForConnection)
+                    {
+                        bool edgeExists = _graph.Edges.Any(ed =>
+                            (ed.Source == _selectedNodeForConnection && ed.Destination == destinationNode) ||
+                            (ed.Source == destinationNode && ed.Destination == _selectedNodeForConnection));
+
+                        if (!edgeExists)
+                        {
+                            string weightStr = Interaction.InputBox("Introduzca un peso (ej., distancia o tiempo):", "Peso de arista", "100");
+                            if (!double.TryParse(weightStr, out double weight) || weight <= 0)
+                            {
+                                MessageBox.Show("Peso invalido. Usando predeterminado de 100.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                weight = 100;
+                            }
+
+                            Edge newEdge = new Edge(_selectedNodeForConnection, destinationNode, weight);
+                            _graph.AddEdge(newEdge);
+                            DrawEdge(newEdge);
+                            RecalculateAllVehiclePaths(); // Recalcular rutas después de añadir una nueva arista
+                        }
+                        else
+                        {
+                            MessageBox.Show("Una arista ya existe entre estos dos nodos.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                        }
+                    }
+                }
+
+                // Deshacer el resaltado y resetear la selección de conexión
+                _selectedNodeForConnection.UIEllipse.Stroke = Brushes.DarkBlue;
+                _selectedNodeForConnection.UIEllipse.StrokeThickness = 2;
+                _selectedNodeForConnection = null;
+                e.Handled = true;
+            }
+        }
+
+        private void Node_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            Grid clickedNodeContainer = sender as Grid;
+            if (clickedNodeContainer != null)
+            {
+                Node clickedNode = _graph.Nodes.FirstOrDefault(n => n.UIContainer == clickedNodeContainer);
+                if (clickedNode != null)
+                {
+                    ContextMenu cm = new ContextMenu();
+                    MenuItem deleteNodeItem = new MenuItem { Header = "Borrar Nodo" };
+                    deleteNodeItem.Click += (s, ev) => DeleteNode_Click(clickedNode);
+                    cm.Items.Add(deleteNodeItem);
+
+                    clickedNodeContainer.ContextMenu = cm;
+                    cm.IsOpen = true;
+                    e.Handled = true;
+                }
+            }
+        }
+
+        private void DeleteNode_Click(Node nodeToDelete)
+        {
+            MessageBoxResult result = MessageBox.Show(
+                $"¿Está seguro de que desea eliminar el nodo '{nodeToDelete.Id}' y todas sus aristas conectadas?",
+                "Confirmar Eliminación",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                // Eliminar el nodo de la UI
+                if (nodeToDelete.UIContainer != null)
+                {
+                    GraphCanvas.Children.Remove(nodeToDelete.UIContainer);
+                }
+
+                // Eliminar aristas conectadas al nodo (debe hacerse antes de eliminar el nodo del modelo)
+                List<Edge> edgesToRemove = _graph.Edges
+                    .Where(e => e.Source == nodeToDelete || e.Destination == nodeToDelete)
+                    .ToList();
+
+                foreach (var edge in edgesToRemove)
+                {
+                    GraphCanvas.Children.Remove(edge.UILine);
+                    if (edge.WeightTextBlock != null)
+                    {
+                        GraphCanvas.Children.Remove(edge.WeightTextBlock);
+                    }
+                    _graph.Edges.Remove(edge); // Eliminar del modelo después de la UI
+                }
+
+                // Eliminar el nodo del modelo
+                _graph.Nodes.Remove(nodeToDelete);
+
+                // Deseleccionar el nodo si era el seleccionado para conexión
+                if (_selectedNodeForConnection == nodeToDelete)
+                {
+                    _selectedNodeForConnection = null;
+                }
+
+                // Si hay un vehículo seleccionado que dependa de este nodo o pasa por él, deseleccionarlo y recalcular
+                List<Vehicle> vehiclesToRecalculate = _vehicles.Where(v =>
+                    v.StartNode == nodeToDelete || v.EndNode == nodeToDelete || v.Path.Contains(nodeToDelete)
+                ).ToList();
+
+                foreach (var vehicle in vehiclesToRecalculate)
+                {
+                    if (vehicle == _selectedVehicle)
+                    {
+                        HighlightVehiclePath(vehicle, false); // Desresaltar la ruta vieja
+                        _selectedVehicle = null;
+                    }
+                    // El RecalculateAllVehiclePaths manejará la remoción si no hay ruta
+                }
+
+                RecalculateAllVehiclePaths(); // Recalcular todas las rutas de vehículos
+            }
+        }
+        private void UpdateConnectedEdges(Node movedNode)
+        {
+            foreach (var edge in _graph.Edges)
+            {
+                if (edge.Source == movedNode)
+                {
+                    edge.UILine.X1 = movedNode.X;
+                    edge.UILine.Y1 = movedNode.Y;
+                    UpdateEdgeWeightTextPosition(edge);
+                }
+                else if (edge.Destination == movedNode)
+                {
+                    edge.UILine.X2 = movedNode.X;
+                    edge.UILine.Y2 = movedNode.Y;
+                    UpdateEdgeWeightTextPosition(edge);
+                }
+            }
+        }
+        private void UpdateEdgeWeightTextPosition(Edge edge)
+        {
+            if (edge.WeightTextBlock != null)
+            {
+                double centerX = (edge.Source.X + edge.Destination.X) / 2;
+                double centerY = (edge.Source.Y + edge.Destination.Y) / 2;
+
+                Canvas.SetLeft(edge.WeightTextBlock, centerX - (edge.WeightTextBlock.ActualWidth / 2));
+                Canvas.SetTop(edge.WeightTextBlock, centerY - (edge.WeightTextBlock.ActualHeight / 2) - 10);
+            }
+        }
         private void AddNode_Click(object sender, RoutedEventArgs e)
         {
             MessageBox.Show("La función de añadir nodos mediante un botón aún no está implementada. Haga clic en el lienzo para añadir un nodo.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -427,12 +927,8 @@ namespace TrafficSimulator
             }
         }
 
-        // Método MouseMove para el Canvas (útil para arrastrar nodos o dibujar líneas de previsualización)
         private void GraphCanvas_MouseMove(object sender, MouseEventArgs e)
         {
-            // Lógica para arrastrar nodos o para dibujar una línea de previsualización
-            // cuando estás conectando nodos (opcional, para una mejor UX).
-            // Por ahora, no hace nada visual.
         }
         private void ToggleSimulation_Click(object sender, RoutedEventArgs e)
         {

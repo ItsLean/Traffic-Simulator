@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using System.Windows.Controls; // Necesario para TextBlock, si Node.cs lo usa.
-using System.Windows.Shapes;   // Necesario para Ellipse, si Node.cs lo usa.
+using System.Windows.Controls; 
+using System.Windows.Shapes;   
 
 namespace TrafficSimulator.Models
 {
@@ -36,10 +36,6 @@ namespace TrafficSimulator.Models
             }
             Edges.Add(edge);
 
-            // IMPORTANTE: Para este simulador de tráfico, las carreteras suelen ser bidireccionales.
-            // Si una carretera va de A a B, también se puede ir de B a A.
-            // Si las aristas son unidireccionales, omite esta parte.
-            // Aquí asumimos bidireccional, pero puedes modificarlo si es necesario.
             if (!Edges.Any(e => e.Source == edge.Destination && e.Destination == edge.Source))
             {
                 Edges.Add(new Edge(edge.Destination, edge.Source, edge.Weight));

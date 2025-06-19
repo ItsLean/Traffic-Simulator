@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Windows.Shapes; 
 using System.Collections.Generic;
 using System.Windows.Media;
+using System.Windows.Controls;
 
 namespace TrafficSimulator.Models
 {
@@ -14,16 +15,15 @@ namespace TrafficSimulator.Models
         public string Id { get; set; }
         public Node StartNode { get; private set; }
         public Node EndNode { get; private set; }
-        public List<Node> Path { get; private set; }
+        public List<Node> Path { get;  set; }
         public double Speed { get; set; }
-
+        public Node CurrentNode { get; set; }
+        public bool HasReachedDestination { get; set; } = false;
         public int CurrentPathSegmentIndex { get; set; }
         public double DistanceAlongSegment { get; set; }
-
-        // Mantenemos la referencia al UIElement aquí, pero no lo manipulamos directamente.
-        // La manipulación la hará MainWindow.
         public System.Windows.Shapes.Ellipse UIEllipse { get; set; }
-
+        public bool IsSelected { get; set; }
+        public List<Line> PathUILines { get; set; }
 
         public Vehicle(string id, Node start, Node end, List<Node> path, double speed, Brush color)
         {
@@ -35,8 +35,7 @@ namespace TrafficSimulator.Models
             CurrentPathSegmentIndex = 0;
             DistanceAlongSegment = 0;
 
-            // Inicializamos el UIElement aquí, pero no lo posicionamos.
-            UIEllipse = new System.Windows.Shapes.Ellipse // Asegúrate de usar el namespace completo si no tienes el 'using System.Windows.Shapes;'
+            UIEllipse = new System.Windows.Shapes.Ellipse 
             {
                 Width = 10,
                 Height = 10,
@@ -46,9 +45,6 @@ namespace TrafficSimulator.Models
             };
         }
 
-        // Método para actualizar la posición lógica del vehículo en un paso de tiempo
-        // Ahora, este método solo calcula las nuevas X, Y. No actualiza el Canvas.
-        // Devuelve una tupla con la nueva X, Y, y si ha llegado.
         public (double newX, double newY, bool hasArrived) UpdatePosition(double deltaTime)
         {
             if (Path == null || Path.Count < 2 || CurrentPathSegmentIndex >= Path.Count - 1)
@@ -63,7 +59,7 @@ namespace TrafficSimulator.Models
             double segmentLength = CalculateDistance(currentNode.X, currentNode.Y, nextNode.X, nextNode.Y);
 
             double distanceToMove = Speed * deltaTime;
-
+                
             DistanceAlongSegment += distanceToMove;
 
             if (DistanceAlongSegment >= segmentLength)
