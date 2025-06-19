@@ -186,14 +186,40 @@ namespace TrafficSimulator
                     // Crear el menú contextual
                     ContextMenu cm = new ContextMenu();
                     MenuItem deleteItem = new MenuItem { Header = "Borrar arista" };
-                    deleteItem.Click += DeleteEdge_Click; // Asignar el evento Click al MenuItem
+                    deleteItem.Click += DeleteEdge_Click; // Asignar el evento para borrar arista
                     cm.Items.Add(deleteItem);
+
+                    MenuItem changeWeightItem = new MenuItem { Header = "Cambiar peso" };
+                    changeWeightItem.Click += ChangeEdgeWeight_Click; // Asignar el evento para cambiar peso
+                    cm.Items.Add(changeWeightItem);
 
                     clickedLine.ContextMenu = cm; // Asignar el ContextMenu a la línea
                     cm.IsOpen = true; // Abrir el menú contextual
+                    e.Handled = true; // Indicar que el evento ha sido manejado
                 }
             }
         }
+        private void ChangeEdgeWeight_Click(object sender, RoutedEventArgs e)
+        {
+            // Este método se llama cuando el usuario hace clic en "Cambiar peso"
+            if (_contextMenuEdge != null)
+            {
+                string newWeightStr = Microsoft.VisualBasic.Interaction.InputBox(
+                    $"Peso actual: {_contextMenuEdge.Weight}. Introduzca un nuevo peso:",
+                    "Cambiar peso de arista",
+                    _contextMenuEdge.Weight.ToString("F0")); // Mostrar el peso actual como valor predeterminado
+                if (double.TryParse(newWeightStr, out double newWeight) && newWeight > 0)
+                {
+                    _contextMenuEdge.Weight = newWeight;
+                    _contextMenuEdge.WeightTextBlock.Text = newWeight.ToString("F0"); // Actualizar el texto del peso en la UI
+                }
+                else
+                {
+                    MessageBox.Show("Peso inválido. Debe ser un número positivo.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
 
         private void DeleteEdge_Click(object sender, RoutedEventArgs e)
         {
@@ -202,8 +228,8 @@ namespace TrafficSimulator
             {
                 // Confirmación (opcional, pero buena práctica)
                 MessageBoxResult result = MessageBox.Show(
-                    $"Are you sure you want to delete the edge between {_contextMenuEdge.Source.Id} and {_contextMenuEdge.Destination.Id}?",
-                    "Confirm Deletion",
+                    $"¿Está seguro que quiere borrar la arista entre {_contextMenuEdge.Source.Id} y {_contextMenuEdge.Destination.Id}?",
+                    "Confirmar eliminación",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning);
 
