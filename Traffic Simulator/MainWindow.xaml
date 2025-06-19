@@ -4,23 +4,36 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="Traffic Simulator" Height="600" Width="800">
+        Title="Traffic Simulator" Height="650" Width="900">
     <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="691*"/>
-            <ColumnDefinition Width="109*"/>
-        </Grid.ColumnDefinitions>
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Top" Margin="10,10,10,0" Grid.ColumnSpan="2">
-            <Button Content="Add Node" Click="AddNode_Click" Margin="0,0,10,0"/>
-            <Button Content="Connect Nodes" Click="ConnectNodes_Click" Margin="0,0,10,0"/>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Top" Margin="10" Grid.Row="0">
+            <Button Content="Agregar Nodo (Click en el Canvas)" Margin="0,0,10,0" Click="AddNode_Click"/>
+            <Button Content="Conectar Nodos (Arrastrar)" Margin="0,0,10,0" Click="ConnectNodes_Click"/>
+            <Button x:Name="StartStopSimulationButton" Content="Empezar Simulación" Click="ToggleSimulation_Click" Margin="0,0,10,0"/>
+
+            <TextBlock Text="Velocidad de Simulación:" VerticalAlignment="Center" Margin="10,0,5,0"/>
+            <Slider x:Name="SpeedSlider"
+                    Minimum="0.1"        Maximum="5.0"        Value="1.0"          Width="150"
+                    IsSnapToTickEnabled="True"
+                    TickFrequency="0.1"  ValueChanged="SpeedSlider_ValueChanged"/>
+            <TextBlock x:Name="SpeedValueTextBlock"
+                       Text="{Binding ElementName=SpeedSlider, Path=Value, StringFormat={}{0:F1}x}" VerticalAlignment="Center"
+                       Margin="5,0,0,0"/>
         </StackPanel>
 
         <Canvas x:Name="GraphCanvas"
                 Background="LightGray"
-                Margin="10,10,10,10"
+                Margin="10"
                 MouseDown="GraphCanvas_MouseDown"
                 MouseUp="GraphCanvas_MouseUp"
                 MouseMove="GraphCanvas_MouseMove"
-                AllowDrop="True" Grid.ColumnSpan="2"/>
+                AllowDrop="True"
+                Grid.Row="1">
+        </Canvas>
     </Grid>
 </Window>

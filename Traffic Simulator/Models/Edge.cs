@@ -3,11 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Windows.Controls;
 using System.Windows.Shapes;
 
 namespace TrafficSimulator.Models
 {
-    class Edge
+    public class Edge
     {
         public Node Source { get; set; }
         public Node Destination { get; set; }
@@ -15,6 +16,7 @@ namespace TrafficSimulator.Models
 
         // Opcional: Referencia al UIElement para una manipulación más sencilla
         public Line UILine { get; set; }
+        public TextBlock WeightTextBlock { get; set; }
 
         public Edge(Node source, Node destination, double weight = 1)
         {

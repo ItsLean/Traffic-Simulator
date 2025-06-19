@@ -8,7 +8,7 @@ using System.Windows.Shapes;
 
 namespace TrafficSimulator.Models
 {
-    class Node
+    public class Node
     {
         public string Id { get; set; } // Nombre único del nodo (ciudad)
         public double X { get; set; }  // Coordenada X para la visualización

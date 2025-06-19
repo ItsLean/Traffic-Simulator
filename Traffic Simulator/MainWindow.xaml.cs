@@ -4,10 +4,10 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Collections.Generic;
-using System.Linq; // Para el .Any()
-
-// Asegúrate de tener los namespaces correctos para tus modelos
-using TrafficSimulator.Models; // Suponiendo que tus modelos están en una carpeta Models
+using System.Linq;
+using System; 
+using System.Windows.Threading; 
+using TrafficSimulator.Models; 
 
 namespace TrafficSimulator
 {
@@ -16,15 +16,128 @@ namespace TrafficSimulator
         private Graph _graph = new Graph();
         private int _nodeCounter = 0; // Para generar IDs únicos automáticamente
         private Node _selectedNodeForConnection = null; // Para conectar aristas
+        private List<Vehicle> _vehicles = new List<Vehicle>();
+        private DispatcherTimer _simulationTimer;
+        private Random _random = new Random();
+        private int _vehicleCounter = 0; // Para dar IDs únicos a los vehículos
+        private double _simulationSpeed = 1.0; // Factor para acelerar/desacelerar la simulación (1.0 = normal)
+        private const double BaseVehicleSpeed = 50; // Pixels por segundo (la velocidad "real" del vehículo)
+        private TimeSpan _simulationTickInterval = TimeSpan.FromMilliseconds(50); // Frecuencia de actualización de la simulación
 
         public MainWindow()
         {
             InitializeComponent();
+            InitializeSimulationTimer();
+        }
+        private void SpeedSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            // El 'sender' es el Slider que disparó el evento
+            Slider slider = sender as Slider;
+            if (slider != null)
+            {
+                // Actualizar la variable _simulationSpeed con el nuevo valor del slider
+                _simulationSpeed = slider.Value;
+                // El TextBlock ya se actualiza automáticamente gracias al Binding en XAML.
+            }
+        }
+        private void InitializeSimulationTimer()
+        {
+            _simulationTimer = new DispatcherTimer();
+            _simulationTimer.Interval = _simulationTickInterval; // Actualizar cada 50 ms
+            _simulationTimer.Tick += SimulationTimer_Tick;
+            // _simulationTimer.Start(); // No iniciar automáticamente, el usuario lo hará con un botón
         }
 
-        // --- Agregar Nodos (ID 002) ---
+        private void SimulationTimer_Tick(object sender, EventArgs e)
+        {
+            // Generar nuevos vehículos aleatoriamente
+            if (_random.Next(1, 100) < 5)
+            {
+                GenerateRandomVehicle();
+            }
 
-        // Método que se llama cuando el usuario hace clic en el lienzo para agregar un nodo
+            List<Vehicle> vehiclesToRemove = new List<Vehicle>();
+            foreach (var vehicle in _vehicles)
+            {
+                double actualSpeedPerTick = BaseVehicleSpeed * _simulationSpeed * _simulationTickInterval.TotalSeconds;
+
+                // Ahora, UpdatePosition devuelve la nueva posición y si ha llegado
+                (double newX, double newY, bool hasArrived) = vehicle.UpdatePosition(actualSpeedPerTick);
+
+                // Actualizar la posición del UIElement del vehículo en el Canvas desde MainWindow
+                if (vehicle.UIEllipse != null)
+                {
+                    // Centrar el vehículo en la posición calculada
+                    Canvas.SetLeft(vehicle.UIEllipse, newX - vehicle.UIEllipse.Width / 2);
+                    Canvas.SetTop(vehicle.UIEllipse, newY - vehicle.UIEllipse.Height / 2);
+                }
+
+                if (hasArrived)
+                {
+                    vehiclesToRemove.Add(vehicle);
+                }
+            }
+
+            foreach (var vehicle in vehiclesToRemove)
+            {
+                _vehicles.Remove(vehicle);
+                GraphCanvas.Children.Remove(vehicle.UIEllipse);
+            }
+        }
+
+        private void GenerateRandomVehicle()
+        {
+            if (_graph.Nodes.Count < 2)
+            {
+                // No hay suficientes nodos para crear una ruta
+                return;
+            }
+
+            // Seleccionar nodos de inicio y fin aleatorios
+            Node startNode = _graph.Nodes[_random.Next(_graph.Nodes.Count)];
+            Node endNode = _graph.Nodes[_random.Next(_graph.Nodes.Count)];
+
+            // Asegurarse de que el nodo de inicio no sea el mismo que el de destino
+            while (startNode == endNode)
+            {
+                endNode = _graph.Nodes[_random.Next(_graph.Nodes.Count)];
+            }
+
+            // Calcular la ruta más corta
+            var dijkstraResult = _graph.CalculateShortestPaths(startNode);
+            List<Node> path = _graph.GetShortestPath(startNode, endNode, dijkstraResult);
+
+            if (path == null || path.Count < 2)
+            {
+                // No se encontró un camino válido entre los nodos
+                // Esto podría ocurrir si el grafo no está conectado
+                Console.WriteLine($"No path found from {startNode.Id} to {endNode.Id}");
+                return;
+            }
+
+            // Crear el vehículo
+            _vehicleCounter++;
+            Brush vehicleColor = GetRandomColor();
+            Vehicle newVehicle = new Vehicle($"V{_vehicleCounter}", startNode, endNode, path, BaseVehicleSpeed, vehicleColor);
+
+            _vehicles.Add(newVehicle);
+
+            // Añadir el vehículo a la UI en la posición inicial del nodo de inicio
+            Canvas.SetLeft(newVehicle.UIEllipse, startNode.X - newVehicle.UIEllipse.Width / 2);
+            Canvas.SetTop(newVehicle.UIEllipse, startNode.Y - newVehicle.UIEllipse.Height / 2);
+            GraphCanvas.Children.Add(newVehicle.UIEllipse);
+        }
+
+        private Brush GetRandomColor()
+        {
+            // Colores más amigables para vehículos
+            var colors = new List<Brush>
+            {
+                Brushes.Green, Brushes.Orange, Brushes.Purple, Brushes.Teal, Brushes.DarkCyan,
+                Brushes.Brown, Brushes.Indigo, Brushes.Olive, Brushes.SaddleBrown
+            };
+            return colors[_random.Next(colors.Count)];
+        }
         private void GraphCanvas_MouseDown(object sender, MouseButtonEventArgs e)
         {
             if (e.LeftButton == MouseButtonState.Pressed && _selectedNodeForConnection == null)
@@ -33,18 +146,18 @@ namespace TrafficSimulator
                 Point clickPoint = e.GetPosition(GraphCanvas);
 
                 // Pedir al usuario un nombre para el nodo
-                string nodeId = Microsoft.VisualBasic.Interaction.InputBox("Enter Node Name:", "Add New Node", $"Node{_nodeCounter + 1}");
+                string nodeId = Microsoft.VisualBasic.Interaction.InputBox("Introduzca el nombre del nodo:", "Añadir nuevo nodo", $"Nodo{_nodeCounter + 1}");
 
                 if (string.IsNullOrWhiteSpace(nodeId))
                 {
-                    MessageBox.Show("Node name cannot be empty.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("El nombre del nodo no puede ser vacío.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
 
                 // Verificar si el nombre ya existe
                 if (_graph.Nodes.Any(n => n.Id.Equals(nodeId, StringComparison.OrdinalIgnoreCase)))
                 {
-                    MessageBox.Show($"Node with name '{nodeId}' already exists. Please choose a unique name.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show($"Nodo wcon el nombre '{nodeId}' ya existe. Porfavor seleccione un nombre diferente.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
 
@@ -57,14 +170,75 @@ namespace TrafficSimulator
                 DrawNode(newNode);
             }
         }
+        // Variable para almacenar la arista sobre la que se hizo clic derecho
+        private Edge _contextMenuEdge = null;
 
+        private void Edge_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            Line clickedLine = sender as Line;
+            if (clickedLine != null)
+            {
+                // Encontrar la arista del modelo asociada a esta línea UI
+                _contextMenuEdge = _graph.Edges.FirstOrDefault(ed => ed.UILine == clickedLine);
+
+                if (_contextMenuEdge != null)
+                {
+                    // Crear el menú contextual
+                    ContextMenu cm = new ContextMenu();
+                    MenuItem deleteItem = new MenuItem { Header = "Borrar arista" };
+                    deleteItem.Click += DeleteEdge_Click; // Asignar el evento Click al MenuItem
+                    cm.Items.Add(deleteItem);
+
+                    clickedLine.ContextMenu = cm; // Asignar el ContextMenu a la línea
+                    cm.IsOpen = true; // Abrir el menú contextual
+                }
+            }
+        }
+
+        private void DeleteEdge_Click(object sender, RoutedEventArgs e)
+        {
+            // Este método se llama cuando el usuario hace clic en "Borrar arista"
+            if (_contextMenuEdge != null)
+            {
+                // Confirmación (opcional, pero buena práctica)
+                MessageBoxResult result = MessageBox.Show(
+                    $"Are you sure you want to delete the edge between {_contextMenuEdge.Source.Id} and {_contextMenuEdge.Destination.Id}?",
+                    "Confirm Deletion",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+
+                if (result == MessageBoxResult.Yes)
+                {
+                    // Eliminar la arista del modelo (y su contraparte si es bidireccional)
+                    _graph.Edges.Remove(_contextMenuEdge);
+
+                    // También eliminar la arista bidireccional si existe
+                    Edge reverseEdge = _graph.Edges.FirstOrDefault(ed =>
+                        ed.Source == _contextMenuEdge.Destination && ed.Destination == _contextMenuEdge.Source);
+                    if (reverseEdge != null)
+                    {
+                        _graph.Edges.Remove(reverseEdge);
+                        GraphCanvas.Children.Remove(reverseEdge.UILine); // Eliminar también la línea inversa de la UI
+                    }
+
+                    // Eliminar la línea de la UI
+                    GraphCanvas.Children.Remove(_contextMenuEdge.UILine);
+
+                    // Limpiar la referencia
+                    _contextMenuEdge = null;
+
+                    // Opcional: Recalcular rutas para vehículos existentes si las rutas se invalidaron
+                    // (Esto se haría en un requerimiento posterior, pero es una consideración importante)
+                }
+            }
+        }
         private void DrawNode(Node node)
         {
             // Dibujar un círculo para el nodo
             Ellipse nodeShape = new Ellipse
             {
-                Width = 40,
-                Height = 40,
+                Width = 60,
+                Height = 60,
                 Fill = Brushes.Blue,
                 Stroke = Brushes.DarkBlue,
                 StrokeThickness = 2
@@ -143,8 +317,15 @@ namespace TrafficSimulator
 
                         if (!edgeExists)
                         {
-                            // Crear la arista en el modelo
-                            Edge newEdge = new Edge(_selectedNodeForConnection, destinationNode);
+                            string weightStr = Microsoft.VisualBasic.Interaction.InputBox("Introduzca un peso (e.g., distancia o tiempo):", "Peso de arista", "100");
+                            if (!double.TryParse(weightStr, out double weight) || weight <= 0)
+                            {
+                                MessageBox.Show("Peso invalido. Usando predeterminado de 100.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                weight = 100;
+                            }
+
+                            Edge newEdge = new Edge(_selectedNodeForConnection, destinationNode, weight); 
+
                             _graph.AddEdge(newEdge);
 
                             // Dibujar la arista
@@ -152,15 +333,17 @@ namespace TrafficSimulator
                         }
                         else
                         {
-                            MessageBox.Show("An edge already exists between these two nodes.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                            MessageBox.Show("Una arista ya existe entre estos dos nodos", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
                         }
                     }
                 }
-
-                // Deshacer el resaltado y resetear la selección
-                _selectedNodeForConnection.UIEllipse.Stroke = Brushes.DarkBlue;
-                _selectedNodeForConnection.UIEllipse.StrokeThickness = 2;
-                _selectedNodeForConnection = null;
+                if (_selectedNodeForConnection != null)
+                {
+                    // Deshacer el resaltado y resetear la selección
+                    _selectedNodeForConnection.UIEllipse.Stroke = Brushes.DarkBlue;
+                    _selectedNodeForConnection.UIEllipse.StrokeThickness = 2;
+                    _selectedNodeForConnection = null;
+                }
             }
         }
 
@@ -176,41 +359,40 @@ namespace TrafficSimulator
                 StrokeThickness = 2
             };
 
-            // Añadir la línea al Canvas. Es importante añadirla ANTES de los nodos para que queden encima.
-            GraphCanvas.Children.Insert(0, edgeLine); // Insertar al principio de la lista de hijos
+            edgeLine.MouseRightButtonUp += Edge_MouseRightButtonUp;
 
-            // Almacenar referencia al UIElement en el modelo Edge
-            edge.UILine = edgeLine;
+            TextBlock weightText = new TextBlock
+            {
+                Text = edge.Weight.ToString("F0"), // Formatear el peso sin decimales (o "F1" para uno)
+                Foreground = Brushes.Red,         // Color del texto (puedes elegir otro)
+                Background = Brushes.LightYellow, // Fondo para que sea más legible sobre la línea
+                Padding = new Thickness(2),
+            };
+            double centerX = (edge.Source.X + edge.Destination.X) / 2;
+            double centerY = (edge.Source.Y + edge.Destination.Y) / 2;
+
+            Canvas.SetLeft(weightText, centerX - (weightText.ActualWidth / 2));
+            Canvas.SetTop(weightText, centerY - (weightText.ActualHeight / 2) - 10);
+
+            GraphCanvas.Children.Insert(0, edgeLine);
+            GraphCanvas.Children.Add(weightText);
+
+            edge.UILine = edgeLine; 
+            edge.WeightTextBlock = weightText;
         }
 
-        // --- Para el cuadro de diálogo de entrada (Microsoft.VisualBasic) ---
-        // Necesitarás añadir una referencia al ensamblado 'Microsoft.VisualBasic'
-        // Clic derecho en 'Referencias' o 'Dependencias' en tu proyecto en Visual Studio -> 'Add Project Reference...'
-        // Busca y marca 'Microsoft.VisualBasic' bajo la pestaña 'Assemblies' -> 'Framework' o 'All'.
-        // ... (tu código existente de MainWindow.xaml.cs) ...
-
-        // Métodos para los botones (actualmente vacíos, se implementarán después)
         private void AddNode_Click(object sender, RoutedEventArgs e)
         {
-            // Aquí iría la lógica específica para un botón de añadir nodo,
-            // si el usuario no lo va a añadir directamente con un click en el lienzo.
-            // Por ahora, no hace nada. La creación de nodos sigue siendo por clic en el lienzo.
-            MessageBox.Show("Adding node via button is not yet implemented. Click on the canvas to add a node.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("La función de añadir nodos mediante un botón aún no está implementada. Haga clic en el lienzo para añadir un nodo.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private void ConnectNodes_Click(object sender, RoutedEventArgs e)
         {
-            // Aquí iría la lógica para iniciar el modo de conexión de nodos si fuera necesario
-            // Por ahora, la conexión se hace arrastrando de un nodo a otro.
-            MessageBox.Show("Connecting nodes via button is not yet implemented. Click and drag between nodes to connect.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("La conexión de nodos mediante botones aún no está implementada. Haga clic y arrastre entre nodos para conectarlos.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
-        // Método MouseUp para el Canvas (actualmente ya lo tenemos en Node_MouseUp,
-        // pero este es para si soltaras el ratón en el canvas fuera de un nodo)
         private void GraphCanvas_MouseUp(object sender, MouseButtonEventArgs e)
         {
-            // Si habías seleccionado un nodo para conectar y lo sueltas fuera de otro nodo,
-            // debes deseleccionar el nodo y quitar el resaltado.
             if (_selectedNodeForConnection != null)
             {
                 _selectedNodeForConnection.UIEllipse.Stroke = Brushes.DarkBlue;
@@ -226,6 +408,24 @@ namespace TrafficSimulator
             // cuando estás conectando nodos (opcional, para una mejor UX).
             // Por ahora, no hace nada visual.
         }
+        private void ToggleSimulation_Click(object sender, RoutedEventArgs e)
+        {
+            if (_simulationTimer.IsEnabled)
+            {
+                _simulationTimer.Stop();
+                (sender as Button).Content = "Empezar Simulación";
+            }
+            else
+            {
+                if (_graph.Nodes.Count < 2)
+                {
+                    MessageBox.Show("Porfavor cree al menos dos nodos y una arista antes de comenzar la simulación.", "Peligro", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                _simulationTimer.Start();
+                (sender as Button).Content = "Parar Simulación";
+            }
+        }
     }
 }
-    
+
