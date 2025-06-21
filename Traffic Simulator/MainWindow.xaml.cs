@@ -22,7 +22,7 @@ namespace TrafficSimulator
         private Random _random = new Random();
         private int _vehicleCounter = 0; // Para dar IDs únicos a los vehículos
         private double _simulationSpeed = 1.0; // Factor para acelerar/desacelerar la simulación (1.0 = normal)
-        private const double BaseVehicleSpeed = 60; // Pixels por segundo (la velocidad "real" del vehículo)
+        private const double BaseVehicleSpeed = 30; // Pixels por segundo (la velocidad "real" del vehículo)
         private TimeSpan _simulationTickInterval = TimeSpan.FromMilliseconds(100); // Frecuencia de actualización de la simulación
         private Vehicle _selectedVehicle = null;
         private const double SelectedPathThickness = 5;
@@ -437,7 +437,10 @@ namespace TrafficSimulator
                 {
                     // Eliminar la arista del modelo (y su contraparte si es bidireccional)
                     _graph.Edges.Remove(_contextMenuEdge);
-
+                    if (_contextMenuEdge.WeightTextBlock != null && GraphCanvas.Children.Contains(_contextMenuEdge.WeightTextBlock))
+                    {
+                        GraphCanvas.Children.Remove(_contextMenuEdge.WeightTextBlock);
+                    }
                     // También eliminar la arista bidireccional si existe
                     Edge reverseEdge = _graph.Edges.FirstOrDefault(ed =>
                         ed.Source == _contextMenuEdge.Destination && ed.Destination == _contextMenuEdge.Source);

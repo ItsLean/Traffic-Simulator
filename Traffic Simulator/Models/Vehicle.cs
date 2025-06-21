@@ -37,8 +37,8 @@ namespace TrafficSimulator.Models
 
             UIEllipse = new System.Windows.Shapes.Ellipse 
             {
-                Width = 10,
-                Height = 10,
+                Width = 15,
+                Height = 15,
                 Fill = color,
                 Stroke = Brushes.Black,
                 StrokeThickness = 1
